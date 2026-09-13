@@ -1,6 +1,6 @@
 from pathlib import Path
 import json
-from parser import analyze_file
+from analyzer.parser import analyze_file
 
 def analyze_project(folder):
     files = Path(folder).rglob("*.py")
@@ -45,57 +45,149 @@ def build_call_graph(project_data):
     for item in project_data:
         file_name = item["file"].split("/")[-1]
 
+        # 1. Add top-level function nodes
         for function in item["functions"]:
+            function_name = function["name"]
+
             nodes.append({
-                "id": f"{file_name}::{function}",
+                "id": f"{file_name}::{function_name}",
                 "type": "function"
             })
 
-        for class_name in item["classes"]:
+        # 2. Add class + method nodes
+        for class_info in item["classes"]:
+            class_name = class_info["name"]
+
             nodes.append({
                 "id": f"{file_name}::{class_name}",
                 "type": "class"
             })
+
+            for method in class_info["methods"]:
+                method_name = method["name"]
+
+                nodes.append({
+                    "id": f"{file_name}::{class_name}::{method_name}",
+                    "type": "method"
+                })
+
+        # 3. Build edges from top-level functions
+        for function in item["functions"]:
+            function_name = function["name"]
+
+            source_id = f"{file_name}::{function_name}"
+
+            for called_name in function["calls"]:
+
+                if called_name in symbol_map:
+                    target = symbol_map[called_name]
+
+                    if target["type"] == "function":
+                        target_id = f'{target["file"]}::{called_name}'
+
+                    elif target["type"] == "class":
+                        target_id = f'{target["file"]}::{called_name}'
+
+                    elif target["type"] == "method":
+                        target_id = (
+                            f'{target["file"]}::'
+                            f'{target["class"]}::'
+                            f'{called_name}'
+                        )
+
+                    edges.append({
+                        "source": source_id,
+                        "target": target_id
+                    })
+        # 4. Build edges from methods
+        for class_info in item["classes"]:
+            class_name = class_info["name"]
+
+            for method in class_info["methods"]:
+                method_name = method["name"]
+
+                source_id = f"{file_name}::{class_name}::{method_name}"
+
+                for called_name in method["calls"]:
+
+                    if called_name in symbol_map:
+                        target = symbol_map[called_name]
+
+                        if target["type"] == "function":
+                            target_id = f'{target["file"]}::{called_name}'
+
+                        elif target["type"] == "class":
+                            target_id = f'{target["file"]}::{called_name}'
+
+                        elif target["type"] == "method":
+                            target_id = (
+                                f'{target["file"]}::'
+                                f'{target["class"]}::'
+                                f'{called_name}'
+                            )
+
+                        edges.append({
+                            "source": source_id,
+                            "target": target_id
+                        })
 
     return {
         "nodes": nodes,
         "edges": edges
     }
 
-def get_project_symbols(project_data):
-    symbols = set()
-
-    for item in project_data:
-        for function in item["functions"]:
-            symbols.add(function)
-
-        for class_name in item["classes"]:
-            symbols.add(class_name)
-
-    return symbols
-
 def build_symbol_map(project_data):
     symbol_map = {}
 
     for item in project_data:
         file_name = item["file"].split("/")[-1]
-
+        #Top-level functions
         for function in item["functions"]:
-            symbol_map[function] = file_name
-
-        for class_name in item["classes"]:
-            symbol_map[class_name] = file_name
-
+            symbol_map[function["name"]] = {
+                "file": file_name,
+                "type": "function"
+            }
+        # Classes
+        for class_info in item["classes"]:
+            class_name = class_info["name"]
+            symbol_map[class_name] = {
+                "file": file_name,
+                "type": "class"
+            }
+            # Methods inside each class
+            for method in class_info["methods"]:
+                symbol_map[method["name"]] = {
+                    "file": file_name,
+                    "class": class_name,
+                    "type": "method"
+                }
     return symbol_map
 
+def build_summary(project_data):
+    file_count = len(project_data)
+
+    function_count = 0
+    class_count = 0
+    method_count = 0
+
+    for item in project_data:
+        function_count += len(item["functions"])
+        class_count += len(item["classes"])
+
+        for class_info in item["classes"]:
+            method_count += len(class_info["methods"])
+
+    return {
+        "files": file_count,
+        "functions": function_count,
+        "classes": class_count,
+        "methods": method_count
+    }
+
 project = analyze_project("sample")
-'''graph = build_dependency_graph(project)
-symbols = get_project_symbols(project)
-symbol_map = build_symbol_map(project)
-print(symbol_map)
-print(symbols)
-print(json.dumps(graph, indent=2))'''
-#call_graph = build_call_graph(project)
-print(json.dumps(project,indent=2))
+call_graph = build_call_graph(project)
+
+print(json.dumps(call_graph, indent=2))
+
 
 

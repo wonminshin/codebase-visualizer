@@ -15,11 +15,33 @@ def get_functions(tree):
 
     return functions
 
-def get_classes(tree):
+def get_class_details(tree):
     classes = []
-    for node in ast.walk(tree):
+
+    for node in tree.body:
         if isinstance(node, ast.ClassDef):
-            classes.append(node.name)
+            methods = []
+
+            for child in node.body:
+                if isinstance(child, ast.FunctionDef):
+                    calls = []
+                    for call_node in ast.walk(child):
+                        if isinstance(call_node, ast.Call):
+                            if isinstance(call_node.func, ast.Name):
+                                calls.append(call_node.func.id)
+                            elif isinstance(call_node.func, ast.Attribute):
+                                calls.append(call_node.func.attr)
+                    methods.append({
+                        "name": child.name,
+                        "line": child.lineno,
+                        "calls": calls
+                    })
+            classes.append({
+                "name": node.name,
+                "line": node.lineno,
+                "methods": methods
+            })
+
     return classes
 
 def get_imports(tree):
@@ -73,7 +95,7 @@ def analyze_file(file_path):
     return {
         "file": str(file_path),
         "functions": get_function_details(tree),
-        "classes": get_classes(tree),
+        "classes": get_class_details(tree),
         "imports": get_imports(tree),
     }
 
