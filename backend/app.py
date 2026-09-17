@@ -1,22 +1,19 @@
 from fastapi import FastAPI
-from analyzer.main import (
-    analyze_project,
-    build_dependency_graph,
-    build_call_graph,
-    build_summary
-)
+from fastapi.middleware.cors import CORSMiddleware
+from analyzer.main import ( analyze_project, build_dependency_graph, build_call_graph,build_summary)
+
 app = FastAPI()
+app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:3000"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"],)
 
 @app.get("/")
 def root():
     return {
-        "message": "CodeLens API is running"
+        "message": "CodeLens API currently running"
     }
 
-
 @app.get("/analyze")
-def analyze():
-    project = analyze_project("analyzer/sample")
+def analyze(folder: str = "analyzer/sample"):
+    project = analyze_project(folder)
     return {
         "summary": build_summary(project),
         "project": project,
