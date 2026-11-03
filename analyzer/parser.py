@@ -92,10 +92,15 @@ def get_function_details(tree):
 
 def analyze_file(file_path):
     tree = parse_file(file_path)
+
+    with open(file_path, "r", encoding="utf-8") as file:
+        source_code = file.read()
+
     return {
         "file": str(file_path),
         "functions": get_function_details(tree),
         "classes": get_class_details(tree),
         "imports": get_imports(tree),
+        "source_code": source_code
     }
 

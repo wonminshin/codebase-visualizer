@@ -3,35 +3,80 @@ import json
 from analyzer.parser import analyze_file
 
 def analyze_project(folder):
-    files = Path(folder).rglob("*.py")
+    root = Path(folder).resolve()
+
+    files = root.rglob("*.py")
     project = []
 
     for file in files:
         result = analyze_file(file)
+
+        # Convert absolute path to path relative to project root
+        result["file"] = file.relative_to(root).as_posix()
+
         project.append(result)
+
     return project
 
 def build_dependency_graph(project_data):
     nodes = []
     edges = []
-    file_names = {
-        item["file"].split("/")[-1].replace(".py", "")
-        for item in project_data
-    }
 
+    module_map = {}
+
+    # Build a map of module names -> file paths
     for item in project_data:
-        source_file = item["file"].split("/")[-1]
+        file_path = item["file"]
+
+        # analyzer/parser.py -> analyzer.parser
+        module_name = file_path.replace("/", ".").removesuffix(".py")
+
+        # analyzer/__init__.py -> analyzer
+        if module_name.endswith(".__init__"):
+            module_name = module_name.removesuffix(".__init__")
+
+        module_map[module_name] = file_path
+
         nodes.append({
-            "id": source_file,
+            "id": file_path,
             "type": "file"
         })
+
+    # Build edges
+    for item in project_data:
+        source_file = item["file"]
+
         for imported_module in item["imports"]:
-            imported_root = imported_module.split(".")[0]
-            if imported_root in file_names:
+            if not isinstance(imported_module, str) or not imported_module:
+                continue
+            target_file = None
+
+            # First try the full module name
+            if imported_module in module_map:
+                target_file = module_map[imported_module]
+
+            # If that fails, try matching a module in the same folder
+            else:
+                source_folder = Path(source_file).parent
+
+                if str(source_folder) == ".":
+                    local_module = imported_module
+                else:
+                    local_module = (
+                        source_folder.as_posix().replace("/", ".")
+                        + "."
+                        + imported_module
+                    )
+
+                if local_module in module_map:
+                    target_file = module_map[local_module]
+
+            if target_file:
                 edges.append({
                     "source": source_file,
-                    "target": imported_root + ".py"
+                    "target": target_file
                 })
+
     return {
         "nodes": nodes,
         "edges": edges
@@ -43,7 +88,7 @@ def build_call_graph(project_data):
     symbol_map = build_symbol_map(project_data)
 
     for item in project_data:
-        file_name = item["file"].split("/")[-1]
+        file_name = item["file"]
 
         # 1. Add top-level function nodes
         for function in item["functions"]:

@@ -1,7 +1,7 @@
 "use client";
-
+import dagre from "@dagrejs/dagre";
 import { useEffect, useState } from "react";
-import { ReactFlow, Background, Controls, type Node, type Edge, } from "@xyflow/react";
+import { ReactFlow, Background, Controls, Position, type Node, type Edge, } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
 type Summary = {
@@ -40,6 +40,7 @@ type AnalysisData = {
   summary: Summary;
   project: FileInfo[];
   dependency_graph: Graph;
+  call_graph: Graph;
 };
 
 type GraphNode = {
@@ -61,17 +62,61 @@ export default function Home() {
   const [data, setData] = useState<AnalysisData | null>(null);
   const [selectedFile, setSelectedFile] = useState<FileInfo | null>(null);
   const [folder, setFolder] =useState("analyzer/sample");
+  const [error, setError] = useState("");
+  const [repoUrl, setRepoUrl] = useState("");
+  const [graphType, setGraphType] = useState<"dependency" | "call">("dependency");
 
-  function analyzeFolder() {
+  async function analyzeFolder() {
+    if (!folder.trim()) {
+      setError("Please enter a folder.");
+      return;
+    }
+
+    setError("");
     setSelectedFile(null);
 
-    fetch(
-      `http://127.0.0.1:8000/analyze?folder=${encodeURIComponent(folder)}`
-    )
-      .then((response) => response.json())
-      .then((result) => {
-        setData(result);
-      });
+    try {
+      const response = await fetch(
+        `http://127.0.0.1:8000/analyze?folder=${encodeURIComponent(folder)}`
+      );
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        setError(result.detail || "Unable to analyze folder.");
+        return;
+      }
+
+      setData(result);
+    } catch {
+      setError("Could not connect to the CodeLens backend.");
+    }
+  }
+  async function analyzeGithub() {
+    if (!repoUrl.trim()) {
+      setError("Please enter a GitHub repository URL.");
+      return;
+    }
+
+    setError("");
+    setSelectedFile(null);
+
+    try {
+      const response = await fetch(
+        `http://127.0.0.1:8000/analyze-github?repo_url=${encodeURIComponent(repoUrl)}`
+      );
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        setError(result.detail || "Unable to analyze repository.");
+        return;
+      }
+
+      setData(result);
+    } catch {
+      setError("Could not connect to the CodeLens backend.");
+    }
   }
 
   useEffect(() => {
@@ -101,9 +146,36 @@ export default function Home() {
       </header>
       <div className="px-8 pt-8">
         <p className="mb-2 text-sm text-gray-400">
-          Analyze a codebase
+          Analyze a GitHub repository
         </p>
 
+        <div className="flex gap-3">
+          <input
+            type="text"
+            value={repoUrl}
+            onChange={(event) => setRepoUrl(event.target.value)}
+            placeholder="https://github.com/username/repository"
+            className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none"
+          />
+
+          <button
+            onClick={analyzeGithub}
+            className="rounded-lg bg-white px-5 py-3 text-sm font-medium text-black hover:bg-gray-200"
+          >
+            Analyze GitHub
+          </button>
+        </div>
+
+        {error && (
+          <p className="mt-2 ml-4 text-sm text-red-400">
+            {error}
+          </p>
+        )}
+      </div>
+      <div className="px-8 pt-8">
+        <p className="mb-2 text-sm text-gray-400">
+          Analyze a codebase
+        </p>
         <div className="flex gap-3">
           <input
             type="text"
@@ -121,6 +193,11 @@ export default function Home() {
           </button>
         </div>
       </div>
+      {error && (
+        <p className="mt-2 ml-10 text-sm text-red-400">
+          {error}
+        </p>
+      )}
 
       <div className="p-8">
 
@@ -159,10 +236,16 @@ export default function Home() {
             selectedFile={selectedFile}
             onSelectFile={setSelectedFile}
           />
-          <DependencyGraph 
-            graph={data.dependency_graph} 
+          <DependencyGraph
+            graph={
+              graphType === "dependency"
+                ? data.dependency_graph
+                : data.call_graph
+            }
             files={data.project}
             onSelectFile={setSelectedFile}
+            graphType={graphType}
+            setGraphType={setGraphType}
           />
           <Inspector file={selectedFile} />
         </div>
@@ -210,7 +293,7 @@ function Explorer({
 
       <div className="space-y-1">
         {files.map((file) => {
-          const fileName = file.file.split("/").pop();
+          const fileName = file.file;
           const isSelected = selectedFile?.file === file.file;
 
           return (
@@ -325,59 +408,105 @@ function DependencyGraph({
   graph,
   files,
   onSelectFile,
-}: 
-{
-  graph: Graph;
+  graphType,
+  setGraphType,
+}: {
+  graph: GraphData;
   files: FileInfo[];
-  onSelectFile: (file: FileInfo)=>void;
+  onSelectFile: (file: FileInfo) => void;
+  graphType: "dependency" | "call";
+  setGraphType: (type: "dependency" | "call") => void;
 }) 
 {
-  const nodes: Node[] = graph.nodes.map((node, index) => ({
+  const connectedNodeIds = new Set(
+    graph.edges.flatMap((edge) => [edge.source, edge.target])
+  );
+
+  const visibleGraphNodes =
+    graphType === "dependency"
+      ? graph.nodes.filter((node) => connectedNodeIds.has(node.id))
+      : graph.nodes;
+
+  const initialNodes: Node[] = visibleGraphNodes.map((node) => ({
     id: node.id,
 
+    sourcePosition: Position.Right,
+    targetPosition: Position.Left,
     position: {
-      x: 100 + index * 180,
-      y: 180,
+      x: 0,
+      y: 0,
     },
 
     data: {
-      label: node.id,
+      label: node.id.split("/").pop(),
     },
 
     style: {
-      background: "#73849c",
-      color: "#bbcad8",
-      border: "1px #232527",
+      background: "#161b22",
+      color: "#f0f6fc",
+      border: "1px solid #30363d",
       borderRadius: "8px",
       padding: "12px",
-      fontSize: "14px"
+      fontSize: "14px",
+      fontWeight: 500,
     },
   }));
 
-  const edges: Edge[] = graph.edges.map((edge, index) => ({
+  const initialEdges: Edge[] = graph.edges.map((edge, index) => ({
     id: `edge-${index}`,
     source: edge.source,
     target: edge.target,
+    type: "smoothstep",
+    animated: false,
+    style: {
+      stroke: "#64748b",
+      strokeWidth: 2,
+    },
   }));
 
+const {
+  nodes,
+  edges,
+} = getLayoutedElements(initialNodes, initialEdges);
   return (
     <div className="h-[500px] overflow-hidden rounded-lg border border-white/10 bg-white/5">
-      <div className="border-b border-white/10 px-4 py-3">
+      <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
         <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">
           Codebase Graph
         </p>
-      </div>
 
-      <div className="h-[450px]">
+        <div className="flex gap-2">
+          <button
+            onClick={() => setGraphType("dependency")}
+            className={`rounded-md px-3 py-1.5 text-xs ${
+              graphType === "dependency"
+                ? "bg-white text-black"
+                : "bg-white/10 text-gray-400"
+            }`}
+          >
+            Dependencies
+          </button>
+
+          <button
+            onClick={() => setGraphType("call")}
+            className={`rounded-md px-3 py-1.5 text-xs ${
+              graphType === "call"
+                ? "bg-white text-black"
+                : "bg-white/10 text-gray-400"
+            }`}
+          >
+            Function Calls
+          </button>
+        </div>
+      </div>
+      <div className="h-[450px] w-full">
         <ReactFlow
           nodes={nodes}
           edges={edges}
           fitView
           onNodeClick={(_, node) => {
-            const matchingFile = files.find(
-              (file) =>file.file.split("/").pop() === node.id
-            );
-
+            const filePath = node.id.split("::")[0];
+            const matchingFile = files.find((file) => file.file === filePath);
             if (matchingFile) {
               onSelectFile(matchingFile);
             }
@@ -389,4 +518,49 @@ function DependencyGraph({
       </div>
     </div>
   );
+}
+
+function getLayoutedElements(
+  nodes: Node[],
+  edges: Edge[]
+) {
+  const dagreGraph = new dagre.graphlib.Graph();
+
+  dagreGraph.setDefaultEdgeLabel(() => ({}));
+
+  dagreGraph.setGraph({
+    rankdir: "LR",
+    nodesep: 100,
+    ranksep: 180,
+  });
+
+  nodes.forEach((node) => {
+    dagreGraph.setNode(node.id, {
+      width: 180,
+      height: 60,
+    });
+  });
+
+  edges.forEach((edge) => {
+    dagreGraph.setEdge(edge.source, edge.target);
+  });
+
+  dagre.layout(dagreGraph);
+
+  const layoutedNodes = nodes.map((node) => {
+    const position = dagreGraph.node(node.id);
+
+    return {
+      ...node,
+      position: {
+        x: position.x - 90,
+        y: position.y - 30,
+      },
+    };
+  });
+
+  return {
+    nodes: layoutedNodes,
+    edges,
+  };
 }
